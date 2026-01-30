@@ -4,7 +4,7 @@ import sys
 import types
 import pytest
 import pydantic
-from pydantic_ui.lib import import_model
+from confantic.lib import import_model
 
 
 def test_import_model_from_module(monkeypatch: pytest.MonkeyPatch) -> None:
