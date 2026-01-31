@@ -1,19 +1,22 @@
 import importlib
-import importlib.util
-from re import A
 import sys
 from pathlib import Path
-from typing import Any, Callable
+import types
+import typing
+from typing import Any, Callable, TypeGuard, TypeVar
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 import yaml
 import json
 import inspect
+import importlib.util
 from pydantic_core import PydanticUndefined
 
 
 class Parser:
-    def __init__(self, parse_func, unparse_func):
+    def __init__(
+        self, parse_func: Callable[[str], Any], unparse_func: Callable[[Any], str]
+    ):
         self.parse_func = parse_func
         self.unparse_func = unparse_func
 
@@ -83,39 +86,55 @@ def load_data(file_path: str):
             raise ValueError("Input file must be .yaml, .yml, or .json")
 
 
-def get_initial_content(model_class) -> dict[str, Any]:
-    """Generate initial content dict for a new file based on required fields and defaults."""
-    import typing
+T = TypeVar("T", bound=type | tuple[type, ...])
 
-    def get_field_default(field: FieldInfo):
-        val = field.default
-        if val is not inspect._empty and val is not PydanticUndefined:
-            return val
 
-        # Handle built-in and typing types
-        origin = getattr(field.annotation, "__origin__", None)
-        typ = origin or field.annotation
-        if typ in (list, typing.List):
-            return []
-        if typ in (dict, typing.Dict):
-            return {}
-        if typ in (str, typing.Text):
-            return ""
-        if typ is int:
-            return 0
-        if typ is float:
-            return 0.0
-        if typ is bool:
-            return False
+def try_issubclass(cls: Any, class_or_tuple: T) -> TypeGuard[T]:
+    return isinstance(cls, type) and issubclass(cls, class_or_tuple)
+
+
+def get_default(annotation: type | types.UnionType) -> typing.Any:
+    if isinstance(annotation, types.UnionType):
+        args = typing.get_args(annotation)
+
+        # If this is optional, return None
+        if types.NoneType in args:
+            return None
+
+        for arg in args:
+            default = get_default(arg)
+            if default is not None:
+                return default
+
         return None
+
+    if try_issubclass(annotation, BaseModel):
+        return get_model_default(annotation)
+    try:
+        return annotation()
+    except TypeError:
+        return None
+
+
+def get_field_default(field: FieldInfo):
+    val = field.get_default()
+    if val not in (inspect._empty, PydanticUndefined):
+        return val
+
+    if field.annotation is None:
+        return None
+
+    return get_default(field.annotation)
+
+
+def get_model_default(model_class) -> dict[str, Any]:
+    """Generate initial content dict for a new file based on required fields and defaults."""
 
     def build_dict(model: type[BaseModel]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for name, field in model.model_fields.items():
             try:
-                if field.annotation is not None and issubclass(
-                    field.annotation, BaseModel
-                ):
+                if try_issubclass(field.annotation, BaseModel):
                     result[name] = build_dict(field.annotation)
                 else:
                     result[name] = get_field_default(field)

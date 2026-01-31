@@ -5,7 +5,7 @@ from textual.widgets import Footer, Header, Input, Static, TextArea
 from textual.containers import Container, Vertical
 from textual.reactive import reactive
 from textual import events
-from .lib import get_initial_content, Parser
+from .lib import get_model_default, Parser
 from pydantic import BaseModel, ValidationError
 import yaml
 import json
@@ -83,7 +83,7 @@ class Editor(App):
                 initial_content = self.file_path.read_text()
             else:
                 try:
-                    data = get_initial_content(self.model_class)
+                    data = get_model_default(self.model_class)
                     initial_content = self.parser.unparse(data)
                 except Exception as e:
                     initial_content = ""
