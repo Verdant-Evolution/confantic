@@ -30,7 +30,7 @@ class ValidationErrorPanel(Static):
         self.update(errors)
 
 
-class Validata(App):
+class Editor(App):
     CSS_PATH = None
     BINDINGS = [
         ("ctrl+s", "save", "Save"),
@@ -66,7 +66,7 @@ class Validata(App):
         self.validation_panel = ValidationErrorPanel()
         self.text_area = TextArea(language=self.syntax)
 
-        self.title = "Validata"
+        self.title = "Confantic"
         self.sub_title = f"{self.file_path.name} ({self.model_class.__name__})"
 
     def compose(self) -> ComposeResult:

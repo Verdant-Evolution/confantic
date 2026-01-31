@@ -1,5 +1,5 @@
 import sys
-from .editor import Validata
+from .editor import Editor
 from .lib import import_model
 
 
@@ -30,7 +30,7 @@ def main():
     except Exception as e:
         print(f"Error importing model: {e}", file=sys.stderr)
         sys.exit(1)
-    app = Validata(
+    app = Editor(
         model_class, args.file, force_format=args.format, force_clean=args.clean
     )
     app.run()
