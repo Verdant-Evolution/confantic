@@ -66,10 +66,7 @@ def test_import_model_class_not_found(tmp_path: Path):
 
 def test_import_model_not_pydantic_class(tmp_path: Path):
     # Write a temporary Python file with a non-pydantic class
-    file_content = """
-class NotPydantic:
-    pass
-"""
+    file_content = """class NotPydantic: pass"""
     file_path = tmp_path / "not_pydantic.py"
     file_path.write_text(file_content)
     import sys
