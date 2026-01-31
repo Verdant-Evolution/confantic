@@ -1,4 +1,5 @@
 import sys
+
 from .editor import Editor
 from .lib import import_model
 

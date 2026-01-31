@@ -1,14 +1,15 @@
-from pathlib import Path
-from typing import Callable, Literal, Sequence
-from textual.app import App, ComposeResult
-from textual.widgets import Footer, Header, Input, Static, TextArea
-from textual.containers import Container, Vertical
-from textual.reactive import reactive
-from textual import events
-from .lib import get_model_default, Parser
-from pydantic import BaseModel, ValidationError
-import yaml
 import json
+from pathlib import Path
+from typing import Literal, Sequence
+
+import yaml
+from pydantic import BaseModel, TypeAdapter, ValidationError
+from textual.app import App, ComposeResult
+from textual.containers import Vertical
+from textual.widgets import Footer, Header, Static, TextArea
+
+from .lib import Parser, get_model_default, render_type_name
+from .validate import validate
 
 ParseFormat = Literal["json", "yaml"]
 
@@ -41,14 +42,14 @@ class Editor(App):
 
     def __init__(
         self,
-        model_class: type[BaseModel],
+        model: type[BaseModel] | TypeAdapter,
         file_path: Path | str,
         force_format: ParseFormat | None = None,
         force_clean: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.model_class = model_class
+        self.model = model
         self.file_path = Path(file_path)
         self.force_clean = force_clean
 
@@ -67,7 +68,7 @@ class Editor(App):
         self.text_area = TextArea(language=self.syntax)
 
         self.title = "Confantic"
-        self.sub_title = f"{self.file_path.name} ({self.model_class.__name__})"
+        self.sub_title = f"{self.file_path.name} ({render_type_name(model)})"
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -83,12 +84,12 @@ class Editor(App):
                 initial_content = self.file_path.read_text()
             else:
                 try:
-                    data = get_model_default(self.model_class)
+                    data = get_model_default(self.model)
                     initial_content = self.parser.unparse(data)
                 except Exception as e:
                     initial_content = ""
                     self.notify(
-                        f"Default serialization failed for {self.model_class.__name__}",
+                        f"Default serialization failed for {render_type_name(self.model)}",
                         severity="error",
                         timeout=4,
                     )
@@ -98,7 +99,7 @@ class Editor(App):
 
     def format_validation_errors(self, ve: ValidationError) -> str:
         lines = []
-        model_fields = getattr(self.model_class, "__fields__", {})
+        model_fields = getattr(self.model, "__fields__", {})
         for err in ve.errors():
             loc: Sequence[int | str] = err.get("loc", [])
             loc_str = ".".join(str(x) for x in loc)
@@ -117,8 +118,7 @@ class Editor(App):
     def action_validate(self):
         text = self.text_area.text
         try:
-            data = self.parser.parse(text)
-            self.model_class(**data)
+            validate(self.model, self.parser.parse(text))
             self.validation_panel.update_errors("")
         except json.JSONDecodeError as e:
             self.validation_panel.update_errors(

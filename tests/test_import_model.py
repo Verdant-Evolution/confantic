@@ -1,9 +1,11 @@
-from pathlib import Path
-import textwrap
 import sys
+import textwrap
 import types
-import pytest
+from pathlib import Path
+
 import pydantic
+import pytest
+
 from confantic.lib import import_model
 
 

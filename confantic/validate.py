@@ -1,7 +1,17 @@
 import argparse
 import sys
-from pydantic import ValidationError
+
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
 from .lib import import_model, load_data
+
+
+def validate(model_class: type[BaseModel] | TypeAdapter, data: dict):
+    if isinstance(model_class, TypeAdapter):
+        adapter = model_class
+        return adapter.validate_python(data)
+
+    return model_class(**data)
 
 
 def main():
@@ -27,7 +37,7 @@ def main():
         sys.exit(1)
 
     try:
-        model_instance = model_class(**data)
+        model_instance = validate(model_class, data)
         print("Validation successful! Data conforms to the model.")
     except ValidationError as ve:
         print("Validation failed:")
