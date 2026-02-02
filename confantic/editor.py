@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal, Sequence, Union, Optional
 
 import yaml
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -42,9 +42,9 @@ class Editor(App):
 
     def __init__(
         self,
-        model: type[BaseModel] | TypeAdapter,
-        file_path: Path | str,
-        force_format: ParseFormat | None = None,
+        model: Union[type[BaseModel], TypeAdapter],
+        file_path: Union[Path, str],
+        force_format: Optional[ParseFormat] = None,
         force_clean: bool = False,
         **kwargs,
     ):
@@ -101,7 +101,7 @@ class Editor(App):
         lines = []
         model_fields = getattr(self.model, "__fields__", {})
         for err in ve.errors():
-            loc: Sequence[int | str] = err.get("loc", [])
+            loc: Sequence[Union[int, str]] = err.get("loc", [])
             loc_str = ".".join(str(x) for x in loc)
             msg = err.get("msg", "")
             typ = err.get("type", "")
