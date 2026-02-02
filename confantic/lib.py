@@ -6,7 +6,7 @@ import sys
 import types
 import typing
 from pathlib import Path
-from typing import Any, Callable, TypeGuard, TypeVar
+from typing import Any, Callable, TypeGuard, TypeVar, Union
 
 import yaml
 from pydantic import BaseModel, TypeAdapter
@@ -139,7 +139,7 @@ def render_type_name(typ: Any) -> str:
     return "Unknown"
 
 
-T = TypeVar("T", bound=type | tuple[type, ...])
+T = TypeVar("T", bound=Union[type, tuple[type, ...]])
 
 
 def try_issubclass(cls: Any, class_or_tuple: T) -> TypeGuard[T]:
@@ -202,10 +202,10 @@ def get_field_default(field: FieldInfo):
     return get_default(field.annotation)
 
 
-def get_model_default(model_class: type[BaseModel] | TypeAdapter) -> dict[str, Any]:
+def get_model_default(model_class: Union[type[BaseModel], TypeAdapter]) -> dict[str, Any]:
     """Generate initial content dict for a new file based on required fields and defaults."""
 
-    def build_dict(model: type[BaseModel] | TypeAdapter) -> dict[str, Any]:
+    def build_dict(model: Union[type[BaseModel], TypeAdapter]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         if isinstance(model, TypeAdapter):
             return get_default(model._type)
