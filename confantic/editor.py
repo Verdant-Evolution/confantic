@@ -16,6 +16,9 @@ from .autocomplete import (
     get_field_names,
     get_current_context,
     filter_suggestions,
+    get_existing_keys_in_current_object,
+    get_current_object_path,
+    get_nested_model_at_path,
 )
 
 ParseFormat = Literal["json", "yaml"]
@@ -170,17 +173,37 @@ class Editor(App):
         )
         
         if partial_key is not None:
-            # Filter suggestions
-            suggestions = filter_suggestions(self.field_names, partial_key)
+            # Get the current object path (for nested objects)
+            object_path = get_current_object_path(
+                self.text_area.text, cursor_row, cursor_col
+            )
             
-            if suggestions:
-                # Calculate popup position
-                # Position it near the cursor
-                cursor_screen_offset = self.text_area.cursor_screen_offset
-                position = Offset(cursor_screen_offset.x, cursor_screen_offset.y + 1)
+            # Get the appropriate model for the current nesting level
+            current_model = get_nested_model_at_path(self.model, object_path)
+            
+            if current_model is not None:
+                # Get field names for the current model
+                field_names = get_field_names(current_model)
                 
-                self.autocomplete_popup.show_suggestions(suggestions, position)
-                return
+                # Get existing keys in the current object to filter them out
+                existing_keys = get_existing_keys_in_current_object(
+                    self.text_area.text, cursor_row, cursor_col
+                )
+                
+                # Filter out existing keys
+                available_fields = [f for f in field_names if f not in existing_keys]
+                
+                # Filter suggestions based on partial input
+                suggestions = filter_suggestions(available_fields, partial_key)
+                
+                if suggestions:
+                    # Calculate popup position
+                    # Position it near the cursor
+                    cursor_screen_offset = self.text_area.cursor_screen_offset
+                    position = Offset(cursor_screen_offset.x, cursor_screen_offset.y + 1)
+                    
+                    self.autocomplete_popup.show_suggestions(suggestions, position)
+                    return
         
         # Hide popup if no suggestions
         self.autocomplete_popup.hide_popup()
@@ -214,19 +237,37 @@ class Editor(App):
                 lines = self.text_area.text.split('\n')
                 if cursor_row < len(lines):
                     current_line = lines[cursor_row]
-                    # Calculate replacement
-                    new_line = (
-                        current_line[:key_start_col] + 
-                        suggestion + 
-                        current_line[cursor_col:]
-                    )
+                    
+                    # For JSON, we need to add the closing quote
+                    # Check if we're in JSON mode by looking for quote before partial_key
+                    is_json = self.syntax == "json"
+                    
+                    if is_json:
+                        # Replace with suggestion and add closing quote
+                        new_line = (
+                            current_line[:key_start_col] + 
+                            suggestion + 
+                            '"' +  # Add closing quote for JSON
+                            current_line[cursor_col:]
+                        )
+                    else:
+                        # YAML - no quotes needed
+                        new_line = (
+                            current_line[:key_start_col] + 
+                            suggestion + 
+                            current_line[cursor_col:]
+                        )
+                    
                     lines[cursor_row] = new_line
                     
                     # Update text
                     self.text_area.text = '\n'.join(lines)
                     
-                    # Move cursor to end of inserted suggestion
-                    new_col = key_start_col + len(suggestion)
+                    # Move cursor to end of inserted suggestion (after closing quote for JSON)
+                    if is_json:
+                        new_col = key_start_col + len(suggestion) + 1  # +1 for closing quote
+                    else:
+                        new_col = key_start_col + len(suggestion)
                     self.text_area.move_cursor((cursor_row, new_col))
             
             # Hide popup
