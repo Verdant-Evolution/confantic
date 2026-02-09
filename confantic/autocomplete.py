@@ -112,8 +112,13 @@ def get_current_context(text: str, cursor_row: int, cursor_col: int) -> tuple[Op
     before_cursor = current_line[:cursor_col]
     
     # Try to detect if we're typing a key in JSON or YAML
-    # JSON: after "{" or "," look for a new key being typed
-    # YAML: at start of line or after ":" look for a new key being typed
+    # Priority: Check for value position first (after colon), then check for key positions
+    
+    # Check if we're typing a value (after colon) - don't suggest keys here
+    after_colon_match = re.search(r':\s*(\w*)$', before_cursor)
+    if after_colon_match:
+        # This is likely a value, not a key - don't suggest
+        return None, 0
     
     # Check if we're typing after a quote (JSON key)
     json_key_match = re.search(r'"([^"]*?)$', before_cursor)
@@ -128,12 +133,6 @@ def get_current_context(text: str, cursor_row: int, cursor_col: int) -> tuple[Op
         partial_key = yaml_key_match.group(1)
         key_start = yaml_key_match.start(1)
         return partial_key, key_start
-    
-    # Check if we're typing an unquoted JSON/YAML key after colon
-    after_colon_match = re.search(r':\s*(\w*)$', before_cursor)
-    if after_colon_match:
-        # This is likely a value, not a key - don't suggest
-        return None, 0
     
     return None, 0
 

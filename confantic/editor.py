@@ -233,7 +233,13 @@ class Editor(App):
             self.autocomplete_popup.hide_popup()
 
     def on_key(self, event):
-        """Handle key events for autocomplete navigation."""
+        """
+        Handle key events for autocomplete navigation.
+        
+        When the autocomplete popup is visible, this method intercepts
+        arrow key and tab/escape presses to provide keyboard navigation
+        for the suggestion list.
+        """
         # Check if autocomplete is visible
         if self.autocomplete_popup.styles.display == "block":
             if event.key == "up":

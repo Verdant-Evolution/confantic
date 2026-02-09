@@ -87,7 +87,7 @@ def test_filter_suggestions():
     
     # Test with prefix matching multiple
     suggestions = filter_suggestions(field_names, "a")
-    assert set(suggestions) == {"age", "address"}
+    assert sorted(suggestions) == ["address", "age"]
     
     # Test with no match
     suggestions = filter_suggestions(field_names, "xyz")
