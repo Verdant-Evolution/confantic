@@ -77,6 +77,7 @@ class Editor(App):
         self.text_area = TextArea(language=self.syntax)
         self.autocomplete_popup = AutocompletePopup()
         self.autocomplete_enabled = True
+        self.skip_next_autocomplete = False
         self.field_names = get_field_names(model)
 
         self.title = "Confantic"
@@ -154,6 +155,11 @@ class Editor(App):
         if not self.autocomplete_enabled:
             return
         
+        # Skip if we just accepted a suggestion
+        if self.skip_next_autocomplete:
+            self.skip_next_autocomplete = False
+            return
+        
         # Get cursor position
         cursor_location = self.text_area.selection.end
         cursor_row, cursor_col = cursor_location
@@ -185,8 +191,15 @@ class Editor(App):
 
     def action_accept_suggestion(self):
         """Accept the current autocomplete suggestion."""
+        # Only accept if popup is visible
+        if self.autocomplete_popup.styles.display != "block":
+            return
+            
         suggestion = self.autocomplete_popup.get_selected_suggestion()
         if suggestion:
+            # Set flag to skip next autocomplete trigger
+            self.skip_next_autocomplete = True
+            
             # Get cursor position
             cursor_location = self.text_area.selection.end
             cursor_row, cursor_col = cursor_location
@@ -214,8 +227,8 @@ class Editor(App):
                     
                     # Move cursor to end of inserted suggestion
                     new_col = key_start_col + len(suggestion)
-                    self.text_area.selection = ((cursor_row, new_col), (cursor_row, new_col))
-                    
+                    self.text_area.move_cursor((cursor_row, new_col))
+            
             # Hide popup
             self.autocomplete_popup.hide_popup()
 
@@ -229,5 +242,15 @@ class Editor(App):
                 event.stop()
             elif event.key == "down":
                 self.autocomplete_popup.navigate_down()
+                event.prevent_default()
+                event.stop()
+            elif event.key == "tab":
+                # Accept the suggestion
+                self.action_accept_suggestion()
+                event.prevent_default()
+                event.stop()
+            elif event.key == "escape":
+                # Hide the popup
+                self.action_hide_autocomplete()
                 event.prevent_default()
                 event.stop()
