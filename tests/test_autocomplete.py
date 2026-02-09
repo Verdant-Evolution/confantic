@@ -16,6 +16,19 @@ class SimpleModel(BaseModel):
     address: str
 
 
+class Address(BaseModel):
+    """Test model for nested object testing."""
+    street: str
+    city: str
+    zip_code: str
+
+
+class Person(BaseModel):
+    """Test model with nested Address."""
+    name: str
+    address: Address
+
+
 def test_get_field_names():
     """Test extracting field names from a Pydantic model."""
     field_names = get_field_names(SimpleModel)
@@ -162,15 +175,6 @@ def test_get_current_object_path():
 def test_get_nested_model_at_path():
     """Test getting nested model based on path."""
     from confantic.autocomplete import get_nested_model_at_path, get_field_names
-    
-    class Address(BaseModel):
-        street: str
-        city: str
-        zip_code: str
-    
-    class Person(BaseModel):
-        name: str
-        address: Address
     
     # Test getting root model
     root_model = get_nested_model_at_path(Person, [])

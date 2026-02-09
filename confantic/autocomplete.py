@@ -137,11 +137,16 @@ def get_current_context(text: str, cursor_row: int, cursor_col: int) -> tuple[Op
             return None, 0
     
     # Check if we're typing a YAML key (word at start of line or after whitespace)
-    yaml_key_match = re.search(r'^\s*(\w+)$', before_cursor)
+    # Note: For YAML, we want to allow triggering even with just whitespace,
+    # so we use (\w*) to match zero or more word characters
+    yaml_key_match = re.search(r'^\s*(\w*)$', before_cursor)
     if yaml_key_match:
         partial_key = yaml_key_match.group(1)
-        key_start = yaml_key_match.start(1)
-        return partial_key, key_start
+        # For YAML, we allow empty partial_key (just whitespace)
+        # This is different from JSON where we require at least one char after quote
+        if len(partial_key) > 0:
+            key_start = yaml_key_match.start(1)
+            return partial_key, key_start
     
     return None, 0
 
