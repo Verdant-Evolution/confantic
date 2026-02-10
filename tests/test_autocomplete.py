@@ -41,7 +41,7 @@ def test_get_current_context_json():
     json_text = '{\n  "n'
     cursor_row = 1
     cursor_col = 4
-    partial_key, key_start = get_current_context(json_text, cursor_row, cursor_col)
+    partial_key, key_start = get_current_context(json_text, cursor_row, cursor_col, "json")
     assert partial_key == "n"
     assert key_start == 3
     
@@ -49,7 +49,7 @@ def test_get_current_context_json():
     json_text = '{\n  "nam'
     cursor_row = 1
     cursor_col = 6
-    partial_key, key_start = get_current_context(json_text, cursor_row, cursor_col)
+    partial_key, key_start = get_current_context(json_text, cursor_row, cursor_col, "json")
     assert partial_key == "nam"
     assert key_start == 3
 
@@ -60,7 +60,7 @@ def test_get_current_context_yaml():
     yaml_text = 'nam'
     cursor_row = 0
     cursor_col = 3
-    partial_key, key_start = get_current_context(yaml_text, cursor_row, cursor_col)
+    partial_key, key_start = get_current_context(yaml_text, cursor_row, cursor_col, "yaml")
     assert partial_key == "nam"
     assert key_start == 0
     
@@ -68,25 +68,25 @@ def test_get_current_context_yaml():
     yaml_text = '  age'
     cursor_row = 0
     cursor_col = 5
-    partial_key, key_start = get_current_context(yaml_text, cursor_row, cursor_col)
+    partial_key, key_start = get_current_context(yaml_text, cursor_row, cursor_col, "yaml")
     assert partial_key == "age"
     assert key_start == 2
 
 
 def test_get_current_context_not_a_key():
     """Test that we don't detect keys when typing values."""
-    # After colon (value position)
+    # After colon (value position) - YAML
     text = 'name: '
     cursor_row = 0
     cursor_col = 6
-    partial_key, key_start = get_current_context(text, cursor_row, cursor_col)
+    partial_key, key_start = get_current_context(text, cursor_row, cursor_col, "yaml")
     assert partial_key is None
     
-    # In the middle of a value
+    # In the middle of a value - YAML
     text = 'name: john'
     cursor_row = 0
     cursor_col = 10
-    partial_key, key_start = get_current_context(text, cursor_row, cursor_col)
+    partial_key, key_start = get_current_context(text, cursor_row, cursor_col, "yaml")
     assert partial_key is None
 
 
@@ -123,14 +123,14 @@ def test_get_current_context_only_after_typing():
     json_text = '{\n  "'
     cursor_row = 1
     cursor_col = 3
-    partial_key, key_start = get_current_context(json_text, cursor_row, cursor_col)
+    partial_key, key_start = get_current_context(json_text, cursor_row, cursor_col, "json")
     assert partial_key is None, "Should not trigger with just a quote"
     
     # Quote with one character - SHOULD trigger
     json_text = '{\n  "n'
     cursor_row = 1
     cursor_col = 4
-    partial_key, key_start = get_current_context(json_text, cursor_row, cursor_col)
+    partial_key, key_start = get_current_context(json_text, cursor_row, cursor_col, "json")
     assert partial_key == "n", "Should trigger after typing one character"
 
 
@@ -142,14 +142,14 @@ def test_get_existing_keys_in_current_object():
     json_text = '{\n  "name": "John",\n  "age": 25,\n  "a'
     cursor_row = 3
     cursor_col = 5
-    existing = get_existing_keys_in_current_object(json_text, cursor_row, cursor_col)
+    existing = get_existing_keys_in_current_object(json_text, cursor_row, cursor_col, "json")
     assert set(existing) == {"name", "age"}, f"Expected name and age, got {existing}"
     
     # Test with nested object
     nested_json = '{\n  "person": {\n    "name": "John",\n    "n'
     cursor_row = 3
     cursor_col = 7
-    existing = get_existing_keys_in_current_object(nested_json, cursor_row, cursor_col)
+    existing = get_existing_keys_in_current_object(nested_json, cursor_row, cursor_col, "json")
     assert existing == ["name"], f"Expected only name in nested object, got {existing}"
 
 
@@ -161,14 +161,14 @@ def test_get_current_object_path():
     json_text = '{\n  "n'
     cursor_row = 1
     cursor_col = 4
-    path = get_current_object_path(json_text, cursor_row, cursor_col)
+    path = get_current_object_path(json_text, cursor_row, cursor_col, "json")
     assert path == [], f"Expected empty path at root, got {path}"
     
     # Test in nested object
     nested_json = '{\n  "address": {\n    "s'
     cursor_row = 2
     cursor_col = 6
-    path = get_current_object_path(nested_json, cursor_row, cursor_col)
+    path = get_current_object_path(nested_json, cursor_row, cursor_col, "json")
     assert path == ["address"], f"Expected ['address'], got {path}"
 
 
