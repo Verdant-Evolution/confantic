@@ -167,15 +167,18 @@ class Editor(App):
         cursor_location = self.text_area.selection.end
         cursor_row, cursor_col = cursor_location
         
+        # Determine if we're editing JSON or YAML
+        is_json = self.syntax == "json"
+        
         # Get current context
         partial_key, key_start_col = get_current_context(
-            self.text_area.text, cursor_row, cursor_col
+            self.text_area.text, cursor_row, cursor_col, is_json
         )
         
         if partial_key is not None:
             # Get the current object path (for nested objects)
             object_path = get_current_object_path(
-                self.text_area.text, cursor_row, cursor_col
+                self.text_area.text, cursor_row, cursor_col, is_json
             )
             
             # Get the appropriate model for the current nesting level
@@ -187,7 +190,7 @@ class Editor(App):
                 
                 # Get existing keys in the current object to filter them out
                 existing_keys = get_existing_keys_in_current_object(
-                    self.text_area.text, cursor_row, cursor_col
+                    self.text_area.text, cursor_row, cursor_col, is_json
                 )
                 
                 # Filter out existing keys
@@ -227,9 +230,12 @@ class Editor(App):
             cursor_location = self.text_area.selection.end
             cursor_row, cursor_col = cursor_location
             
+            # Determine if we're editing JSON or YAML
+            is_json = self.syntax == "json"
+            
             # Get current context to determine what to replace
             partial_key, key_start_col = get_current_context(
-                self.text_area.text, cursor_row, cursor_col
+                self.text_area.text, cursor_row, cursor_col, is_json
             )
             
             if partial_key is not None:
@@ -237,10 +243,6 @@ class Editor(App):
                 lines = self.text_area.text.split('\n')
                 if cursor_row < len(lines):
                     current_line = lines[cursor_row]
-                    
-                    # For JSON, we need to add the closing quote
-                    # Check if we're in JSON mode by looking for quote before partial_key
-                    is_json = self.syntax == "json"
                     
                     if is_json:
                         # Replace with suggestion and add closing quote
@@ -265,6 +267,10 @@ class Editor(App):
                     
                     # Move cursor to end of inserted suggestion (after closing quote for JSON)
                     if is_json:
+                        new_col = key_start_col + len(suggestion) + 1  # +1 for closing quote
+                    else:
+                        new_col = key_start_col + len(suggestion)
+                    self.text_area.move_cursor((cursor_row, new_col))
                         new_col = key_start_col + len(suggestion) + 1  # +1 for closing quote
                     else:
                         new_col = key_start_col + len(suggestion)

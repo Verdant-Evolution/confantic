@@ -1,16 +1,24 @@
-"""Autocomplete functionality for JSON/YAML config editing."""
+"""Autocomplete functionality for JSON/YAML config editing using tree-sitter."""
 
-import json
-import re
+import tree_sitter
+import tree_sitter_json
+import tree_sitter_yaml
 from typing import Optional, Union
 
-import yaml
 from pydantic import BaseModel, TypeAdapter
 from textual.app import ComposeResult
 from textual.containers import Container
 from textual.widgets import OptionList
 from textual.widget import Widget
 from textual.geometry import Offset
+
+
+# Initialize tree-sitter parsers
+_JSON_LANGUAGE = tree_sitter.Language(tree_sitter_json.language())
+_YAML_LANGUAGE = tree_sitter.Language(tree_sitter_yaml.language())
+
+_JSON_PARSER = tree_sitter.Parser(_JSON_LANGUAGE)
+_YAML_PARSER = tree_sitter.Parser(_YAML_LANGUAGE)
 
 
 class AutocompletePopup(Container):
@@ -85,6 +93,234 @@ class AutocompletePopup(Container):
             self.option_list.action_cursor_down()
 
 
+# Tree-sitter helper functions
+
+def _find_deepest_node_at_position(node: tree_sitter.Node, row: int, col: int) -> Optional[tree_sitter.Node]:
+    """
+    Find the deepest node in the tree at the given position.
+    
+    Args:
+        node: The node to start searching from
+        row: The row number (0-indexed)
+        col: The column number (0-indexed)
+        
+    Returns:
+        The deepest node at the position, or None if not found
+    """
+    # Check if position is within this node's range
+    start_row, start_col = node.start_point
+    end_row, end_col = node.end_point
+    
+    # Check if row is in range
+    if row < start_row or row > end_row:
+        return None
+    
+    # Check column boundaries
+    if row == start_row and col < start_col:
+        return None
+    if row == end_row and col > end_col:
+        return None
+    
+    # Try to find a deeper child node at this position
+    for child in node.children:
+        result = _find_deepest_node_at_position(child, row, col)
+        if result:
+            return result
+    
+    # No children match, return this node
+    return node
+
+
+def _is_typing_json_key(node: tree_sitter.Node) -> tuple[bool, Optional[str]]:
+    """
+    Check if a node represents typing a JSON key.
+    
+    Returns:
+        Tuple of (is_key, partial_text)
+    """
+    if not node:
+        return False, None
+    
+    # If we're at a string_content node, check if it's a key
+    if node.type == 'string_content':
+        parent = node.parent
+        
+        # Case 1: In ERROR (incomplete JSON) - check for quote before
+        if parent and parent.type == 'ERROR':
+            for i, child in enumerate(parent.children):
+                if child == node and i > 0:
+                    if parent.children[i-1].type == '"':
+                        return True, node.text.decode('utf-8')
+        
+        # Case 2: In a complete pair - check if we're the key
+        if parent and parent.type == 'string':
+            grandparent = parent.parent
+            if grandparent and grandparent.type == 'pair':
+                # First child is the key
+                if grandparent.children and grandparent.children[0] == parent:
+                    return True, node.text.decode('utf-8')
+    
+    return False, None
+
+
+def _is_typing_yaml_key(node: tree_sitter.Node) -> tuple[bool, Optional[str]]:
+    """
+    Check if a node represents typing a YAML key.
+    
+    Returns:
+        Tuple of (is_key, partial_text)
+    """
+    if not node:
+        return False, None
+    
+    # In YAML, we look for block_mapping_pair or flow_pair nodes
+    # Keys can be plain_scalar, string_scalar, single_quote_scalar, double_quote_scalar, etc.
+    if node.type in ['plain_scalar', 'string_scalar', 'single_quote_scalar', 'double_quote_scalar']:
+        parent = node.parent
+        # Check if parent is flow_node which is child of a mapping pair
+        if parent and parent.type == 'flow_node':
+            grandparent = parent.parent
+            if grandparent and grandparent.type in ['block_mapping_pair', 'flow_pair']:
+                # Check if this flow_node is the first child (the key)
+                if grandparent.children and grandparent.children[0] == parent:
+                    text = node.text.decode('utf-8')
+                    # Remove quotes if present
+                    if text.startswith('"') or text.startswith("'"):
+                        text = text[1:-1] if len(text) > 1 else text[1:]
+                    return True, text
+        # Also check if parent itself is a mapping pair
+        elif parent and parent.type in ['block_mapping_pair', 'flow_pair']:
+            # First child is the key
+            if parent.children and parent.children[0] == node:
+                text = node.text.decode('utf-8')
+                if text.startswith('"') or text.startswith("'"):
+                    text = text[1:-1] if len(text) > 1 else text[1:]
+                return True, text
+    
+    return False, None
+
+
+def _get_containing_object_node(node: tree_sitter.Node, is_json: bool) -> Optional[tree_sitter.Node]:
+    """
+    Find the containing object/map node for the given node.
+    
+    Args:
+        node: The starting node
+        is_json: Whether we're parsing JSON or YAML
+        
+    Returns:
+        The containing object node or None
+    """
+    current = node
+    target_types = ['object', 'ERROR'] if is_json else ['block_mapping', 'flow_mapping', 'ERROR']
+    
+    while current:
+        if current.type in target_types:
+            return current
+        current = current.parent
+    
+    return None
+
+
+def _extract_keys_from_object(object_node: tree_sitter.Node, is_json: bool) -> list[str]:
+    """
+    Extract existing keys from an object/map node.
+    
+    Args:
+        object_node: The object or mapping node
+        is_json: Whether we're parsing JSON or YAML
+        
+    Returns:
+        List of existing key names
+    """
+    keys = []
+    
+    if is_json:
+        # JSON: look for pair nodes (they could be direct children or nested)
+        def extract_pairs(node, depth=0):
+            """Recursively extract pair nodes at the same nesting level."""
+            for child in node.children:
+                if child.type == 'pair':
+                    # Extract the key from the first child
+                    key_node = child.children[0] if child.children else None
+                    if key_node and key_node.type == 'string':
+                        # Extract string_content
+                        for sc in key_node.children:
+                            if sc.type == 'string_content':
+                                keys.append(sc.text.decode('utf-8'))
+                                break
+                elif child.type in ['object', 'ERROR'] and depth == 0:
+                    # Don't recurse into nested objects
+                    continue
+        
+        extract_pairs(object_node)
+    else:
+        # YAML: look for block_mapping_pair or flow_pair nodes
+        for child in object_node.children:
+            if child.type in ['block_mapping_pair', 'flow_pair']:
+                # First child is the key
+                key_node = child.children[0] if child.children else None
+                if key_node:
+                    text = key_node.text.decode('utf-8')
+                    # Remove quotes if present
+                    if text.startswith('"') or text.startswith("'"):
+                        text = text[1:-1] if len(text) > 1 else text[1:]
+                    keys.append(text)
+    
+    return keys
+
+
+def _get_object_path(node: tree_sitter.Node, is_json: bool) -> list[str]:
+    """
+    Get the path from root to the containing object.
+    
+    Args:
+        node: The starting node
+        is_json: Whether we're parsing JSON or YAML
+        
+    Returns:
+        List of field names representing the path
+    """
+    path = []
+    current = node
+    
+    # Walk up the tree, collecting keys as we go
+    while current:
+        parent = current.parent
+        if not parent:
+            break
+        
+        # Check if current is an object/mapping value
+        if is_json:
+            if parent.type == 'pair':
+                # Get the key for this pair
+                key_node = parent.children[0] if parent.children else None
+                if key_node and key_node.type == 'string':
+                    for sc in key_node.children:
+                        if sc.type == 'string_content':
+                            path.insert(0, sc.text.decode('utf-8'))
+                            break
+                # Move up to the object containing this pair
+                current = parent.parent
+                continue
+        else:
+            if parent.type in ['block_mapping_pair', 'flow_pair']:
+                # Get the key for this pair
+                key_node = parent.children[0] if parent.children else None
+                if key_node:
+                    text = key_node.text.decode('utf-8')
+                    if text.startswith('"') or text.startswith("'"):
+                        text = text[1:-1] if len(text) > 1 else text[1:]
+                    path.insert(0, text)
+                # Move up to the mapping containing this pair
+                current = parent.parent
+                continue
+        
+        current = parent
+    
+    return path
+
+
 def get_field_names(model: Union[type[BaseModel], TypeAdapter]) -> list[str]:
     """Extract all field names from a Pydantic model."""
     if isinstance(model, TypeAdapter):
@@ -97,56 +333,46 @@ def get_field_names(model: Union[type[BaseModel], TypeAdapter]) -> list[str]:
     return []
 
 
-def get_current_context(text: str, cursor_row: int, cursor_col: int) -> tuple[Optional[str], int]:
+def get_current_context(text: str, cursor_row: int, cursor_col: int, is_json: bool = True) -> tuple[Optional[str], int]:
     """
-    Determine the current editing context at the cursor position.
+    Determine the current editing context at the cursor position using tree-sitter.
     
+    Args:
+        text: The full text content
+        cursor_row: The cursor row (0-indexed)
+        cursor_col: The cursor column (0-indexed)
+        is_json: Whether parsing JSON (True) or YAML (False)
+        
     Returns:
         A tuple of (partial_key, key_start_col) where:
         - partial_key is the partially typed key name, or None if not typing a key
         - key_start_col is the column where the key started
     """
-    lines = text.split('\n')
-    if cursor_row >= len(lines):
+    # Parse the text
+    text_bytes = text.encode('utf-8')
+    parser = _JSON_PARSER if is_json else _YAML_PARSER
+    tree = parser.parse(text_bytes)
+    
+    # Find the node at the cursor position
+    node = _find_deepest_node_at_position(tree.root_node, cursor_row, cursor_col)
+    if not node:
         return None, 0
     
-    current_line = lines[cursor_row]
-    before_cursor = current_line[:cursor_col]
+    # Check if we're typing a key
+    if is_json:
+        is_key, partial_text = _is_typing_json_key(node)
+    else:
+        is_key, partial_text = _is_typing_yaml_key(node)
     
-    # Try to detect if we're typing a key in JSON or YAML
-    # Priority: Check for value position first (after colon), then check for key positions
-    
-    # Check if we're typing a value (after colon) - don't suggest keys here
-    after_colon_match = re.search(r':\s*(\w*)$', before_cursor)
-    if after_colon_match:
-        # This is likely a value, not a key - don't suggest
-        return None, 0
-    
-    # Check if we're typing after a quote (JSON key)
-    # Modified to only trigger if there's actual content after the quote
-    json_key_match = re.search(r'"([^"]*?)$', before_cursor)
-    if json_key_match:
-        partial_key = json_key_match.group(1)
-        # Only return if there's at least one character typed after the quote
-        # This fixes issue #2 - only show autocomplete after user starts typing
-        if len(partial_key) > 0:
-            key_start = json_key_match.start(1)
-            return partial_key, key_start
+    if is_key and partial_text:
+        # Calculate the start column
+        # For JSON, the key starts after the quote
+        if is_json:
+            key_start_col = node.start_point[1]
         else:
-            # Just a quote with no content - don't trigger autocomplete yet
-            return None, 0
-    
-    # Check if we're typing a YAML key (word at start of line or after whitespace)
-    # Note: For YAML, we want to allow triggering even with just whitespace,
-    # so we use (\w*) to match zero or more word characters
-    yaml_key_match = re.search(r'^\s*(\w*)$', before_cursor)
-    if yaml_key_match:
-        partial_key = yaml_key_match.group(1)
-        # For YAML, we allow empty partial_key (just whitespace)
-        # This is different from JSON where we require at least one char after quote
-        if len(partial_key) > 0:
-            key_start = yaml_key_match.start(1)
-            return partial_key, key_start
+            key_start_col = node.start_point[1]
+        
+        return partial_text, key_start_col
     
     return None, 0
 
@@ -161,101 +387,36 @@ def filter_suggestions(field_names: list[str], partial_key: str) -> list[str]:
     return [name for name in field_names if name.lower().startswith(partial_lower)]
 
 
-def get_existing_keys_in_current_object(text: str, cursor_row: int, cursor_col: int) -> list[str]:
+def get_existing_keys_in_current_object(text: str, cursor_row: int, cursor_col: int, is_json: bool = True) -> list[str]:
     """
-    Extract keys that already exist in the current JSON/YAML object.
+    Extract keys that already exist in the current JSON/YAML object using tree-sitter.
     
-    Returns a list of key names that are already present in the current
-    object scope (not nested objects or parent objects).
+    Args:
+        text: The full text content
+        cursor_row: The cursor row (0-indexed)
+        cursor_col: The cursor column (0-indexed)
+        is_json: Whether parsing JSON (True) or YAML (False)
+        
+    Returns:
+        A list of key names that are already present in the current object scope
     """
-    lines = text.split('\n')
-    if cursor_row >= len(lines):
+    # Parse the text
+    text_bytes = text.encode('utf-8')
+    parser = _JSON_PARSER if is_json else _YAML_PARSER
+    tree = parser.parse(text_bytes)
+    
+    # Find the node at the cursor position
+    node = _find_deepest_node_at_position(tree.root_node, cursor_row, cursor_col)
+    if not node:
         return []
     
-    # Find the start of the current object by looking backwards for '{'
-    object_start_row = cursor_row
-    brace_depth = 0
-    found_start = False
+    # Find the containing object/mapping
+    object_node = _get_containing_object_node(node, is_json)
+    if not object_node:
+        return []
     
-    for i in range(cursor_row, -1, -1):
-        line = lines[i]
-        # Check only up to cursor position on current line
-        check_line = line if i < cursor_row else line[:cursor_col]
-        
-        # Process characters from right to left
-        for j in range(len(check_line) - 1, -1, -1):
-            char = check_line[j]
-            if char == '}':
-                brace_depth += 1
-            elif char == '{':
-                if brace_depth == 0:
-                    # Found our object start
-                    object_start_row = i
-                    found_start = True
-                    break
-                else:
-                    brace_depth -= 1
-        
-        if found_start:
-            break
-    
-    if not found_start:
-        # Couldn't find object start, use beginning
-        object_start_row = 0
-    
-    # Find the end of the current object (or use cursor as end for now)
-    # We'll look from object_start to cursor_row
-    object_lines = []
-    for i in range(object_start_row, cursor_row + 1):
-        if i == cursor_row:
-            # Include up to cursor on current line
-            object_lines.append(lines[i][:cursor_col])
-        else:
-            object_lines.append(lines[i])
-    
-    object_text = '\n'.join(object_lines)
-    
-    # Extract keys from this specific level only
-    # We need to be careful not to extract keys from nested objects
-    # Simple approach: extract keys and then filter out those inside nested braces
-    
-    keys = []
-    brace_depth = 0
-    i = 0
-    while i < len(object_text):
-        char = object_text[i]
-        
-        if char == '{':
-            brace_depth += 1
-            i += 1
-            continue
-        elif char == '}':
-            brace_depth -= 1
-            i += 1
-            continue
-        
-        # Only look for keys at depth 1 (inside our object but not nested)
-        if brace_depth == 1:
-            # Try to match a key pattern from this position
-            # For JSON: "key":
-            json_match = re.match(r'"([^"]+)"\s*:', object_text[i:])
-            if json_match:
-                keys.append(json_match.group(1))
-                i += len(json_match.group(0))
-                continue
-            
-            # For YAML: word at start of line followed by colon
-            # Check if we're at start of line or after newline
-            if i == 0 or object_text[i-1] == '\n':
-                yaml_match = re.match(r'\s*(\w+)\s*:', object_text[i:])
-                if yaml_match:
-                    keys.append(yaml_match.group(1))
-                    i += len(yaml_match.group(0))
-                    continue
-        
-        i += 1
-    
-    return keys
+    # Extract keys from this object
+    return _extract_keys_from_object(object_node, is_json)
 
 
 def get_nested_model_at_path(model: Union[type[BaseModel], TypeAdapter], path: list[str]) -> Optional[Union[type[BaseModel], TypeAdapter]]:
@@ -296,47 +457,29 @@ def get_nested_model_at_path(model: Union[type[BaseModel], TypeAdapter], path: l
     return current_model
 
 
-def get_current_object_path(text: str, cursor_row: int, cursor_col: int) -> list[str]:
+def get_current_object_path(text: str, cursor_row: int, cursor_col: int, is_json: bool = True) -> list[str]:
     """
-    Determine the path to the current object being edited.
+    Determine the path to the current object being edited using tree-sitter.
     
-    Returns a list of field names representing the nesting path,
-    e.g., [] for root, ['address'] for inside an address object.
+    Args:
+        text: The full text content
+        cursor_row: The cursor row (0-indexed)
+        cursor_col: The cursor column (0-indexed)
+        is_json: Whether parsing JSON (True) or YAML (False)
+        
+    Returns:
+        A list of field names representing the nesting path,
+        e.g., [] for root, ['address'] for inside an address object.
     """
-    lines = text.split('\n')
-    if cursor_row >= len(lines):
+    # Parse the text
+    text_bytes = text.encode('utf-8')
+    parser = _JSON_PARSER if is_json else _YAML_PARSER
+    tree = parser.parse(text_bytes)
+    
+    # Find the node at the cursor position
+    node = _find_deepest_node_at_position(tree.root_node, cursor_row, cursor_col)
+    if not node:
         return []
     
-    path = []
-    brace_count = 0
-    
-    # Walk backwards from cursor to build the path
-    for i in range(cursor_row, -1, -1):
-        line = lines[i]
-        # Only check up to cursor on current line
-        check_line = line if i < cursor_row else line[:cursor_col]
-        
-        # Count braces
-        for j in range(len(check_line) - 1, -1, -1):
-            char = check_line[j]
-            if char == '}':
-                brace_count += 1
-            elif char == '{':
-                brace_count -= 1
-                
-                # Found an opening brace - look for the key before it
-                if brace_count < 0:
-                    # Look backwards from this brace to find the key
-                    before_brace = check_line[:j]
-                    # Try to find "key": { pattern
-                    key_match = re.search(r'"([^"]+)"\s*:\s*$', before_brace)
-                    if key_match:
-                        path.insert(0, key_match.group(1))
-                    else:
-                        # Try YAML pattern: key: { or just key:\n  {
-                        key_match = re.search(r'(\w+)\s*:\s*$', before_brace)
-                        if key_match:
-                            path.insert(0, key_match.group(1))
-                    brace_count = 0  # Reset for next level
-    
-    return path
+    # Get the path by walking up the tree
+    return _get_object_path(node, is_json)
