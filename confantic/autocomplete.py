@@ -173,29 +173,29 @@ def _is_typing_yaml_key(node: tree_sitter.Node) -> tuple[bool, Optional[str]]:
     if not node:
         return False, None
     
-    # In YAML, we look for block_mapping_pair or flow_pair nodes
-    # Keys can be plain_scalar, string_scalar, single_quote_scalar, double_quote_scalar, etc.
-    if node.type in ['plain_scalar', 'string_scalar', 'single_quote_scalar', 'double_quote_scalar']:
-        parent = node.parent
-        # Check if parent is flow_node which is child of a mapping pair
-        if parent and parent.type == 'flow_node':
-            grandparent = parent.parent
-            if grandparent and grandparent.type in ['block_mapping_pair', 'flow_pair']:
-                # Check if this flow_node is the first child (the key)
-                if grandparent.children and grandparent.children[0] == parent:
-                    text = node.text.decode('utf-8')
+    # In YAML, we need to walk up the tree to find if we're in a key position
+    # The hierarchy is typically: string_scalar -> plain_scalar -> flow_node -> block_mapping_pair
+    current = node
+    for _ in range(4):  # Walk up max 4 levels
+        if not current:
+            break
+        
+        # Check if we're at a mapping pair level
+        if current.type in ['block_mapping_pair', 'flow_pair']:
+            # Check if our original node is part of the first child (the key)
+            if current.children and len(current.children) > 0:
+                key_node = current.children[0]
+                # Check if our node is within the key node's range
+                if (node.start_point[0] >= key_node.start_point[0] and 
+                    node.end_point[0] <= key_node.end_point[0]):
+                    # We're in the key!
+                    text = key_node.text.decode('utf-8')
                     # Remove quotes if present
                     if text.startswith('"') or text.startswith("'"):
                         text = text[1:-1] if len(text) > 1 else text[1:]
                     return True, text
-        # Also check if parent itself is a mapping pair
-        elif parent and parent.type in ['block_mapping_pair', 'flow_pair']:
-            # First child is the key
-            if parent.children and parent.children[0] == node:
-                text = node.text.decode('utf-8')
-                if text.startswith('"') or text.startswith("'"):
-                    text = text[1:-1] if len(text) > 1 else text[1:]
-                return True, text
+        
+        current = current.parent
     
     return False, None
 

@@ -271,10 +271,6 @@ class Editor(App):
                     else:
                         new_col = key_start_col + len(suggestion)
                     self.text_area.move_cursor((cursor_row, new_col))
-                        new_col = key_start_col + len(suggestion) + 1  # +1 for closing quote
-                    else:
-                        new_col = key_start_col + len(suggestion)
-                    self.text_area.move_cursor((cursor_row, new_col))
             
             # Hide popup
             self.autocomplete_popup.hide_popup()
