@@ -7,9 +7,19 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Footer, Header, Static, TextArea
+from textual.geometry import Offset
 
 from .lib import Parser, get_model_default, render_type_name
 from .validate import validate
+from .autocomplete import (
+    AutocompletePopup,
+    get_field_names,
+    get_current_context,
+    filter_suggestions,
+    get_existing_keys_in_current_object,
+    get_current_object_path,
+    get_nested_model_at_path,
+)
 
 ParseFormat = Literal["json", "yaml"]
 
@@ -38,6 +48,8 @@ class Editor(App):
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+v", "validate", "Validate"),
         ("f5", "validate", "Validate"),
+        ("escape", "hide_autocomplete", "Hide autocomplete"),
+        ("tab", "accept_suggestion", "Accept suggestion"),
     ]
 
     def __init__(
@@ -66,6 +78,10 @@ class Editor(App):
 
         self.validation_panel = ValidationErrorPanel()
         self.text_area = TextArea(language=self.syntax)
+        self.autocomplete_popup = AutocompletePopup()
+        self.autocomplete_enabled = True
+        self.skip_next_autocomplete = False
+        self.field_names = get_field_names(model)
 
         self.title = "Confantic"
         self.sub_title = f"{self.file_path.name} ({render_type_name(model)})"
@@ -75,6 +91,7 @@ class Editor(App):
         with Vertical():
             yield self.text_area
             yield self.validation_panel
+        yield self.autocomplete_popup
         yield Footer()
 
     def on_mount(self):
@@ -135,3 +152,164 @@ class Editor(App):
         self.file_path.write_text(self.text_area.text)
         self.action_validate()
         self.notify("File saved.", timeout=2)
+
+    def on_text_area_changed(self, event: TextArea.Changed):
+        """Handle text changes in the editor to show autocomplete suggestions."""
+        if not self.autocomplete_enabled:
+            return
+        
+        # Skip if we just accepted a suggestion
+        if self.skip_next_autocomplete:
+            self.skip_next_autocomplete = False
+            return
+        
+        # Get cursor position
+        cursor_location = self.text_area.selection.end
+        cursor_row, cursor_col = cursor_location
+        
+        # Determine format type
+        format_type = "json" if self.syntax == "json" else "yaml"
+        
+        # Get current context
+        partial_key, key_start_col = get_current_context(
+            self.text_area.text, cursor_row, cursor_col, format_type
+        )
+        
+        if partial_key is not None:
+            # Get the current object path (for nested objects)
+            object_path = get_current_object_path(
+                self.text_area.text, cursor_row, cursor_col, format_type
+            )
+            
+            # Get the appropriate model for the current nesting level
+            current_model = get_nested_model_at_path(self.model, object_path)
+            
+            if current_model is not None:
+                # Get field names for the current model
+                field_names = get_field_names(current_model)
+                
+                # Get existing keys in the current object to filter them out
+                existing_keys = get_existing_keys_in_current_object(
+                    self.text_area.text, cursor_row, cursor_col, format_type
+                )
+                
+                # Filter out existing keys
+                available_fields = [f for f in field_names if f not in existing_keys]
+                
+                # Filter suggestions based on partial input
+                suggestions = filter_suggestions(available_fields, partial_key)
+                
+                if suggestions:
+                    # Calculate popup position
+                    # Position it near the cursor
+                    cursor_screen_offset = self.text_area.cursor_screen_offset
+                    position = Offset(cursor_screen_offset.x, cursor_screen_offset.y + 1)
+                    
+                    self.autocomplete_popup.show_suggestions(suggestions, position)
+                    return
+        
+        # Hide popup if no suggestions
+        self.autocomplete_popup.hide_popup()
+
+    def action_hide_autocomplete(self):
+        """Hide the autocomplete popup."""
+        self.autocomplete_popup.hide_popup()
+
+    def action_accept_suggestion(self):
+        """Accept the current autocomplete suggestion."""
+        # Only accept if popup is visible
+        if self.autocomplete_popup.styles.display != "block":
+            return
+            
+        suggestion = self.autocomplete_popup.get_selected_suggestion()
+        if suggestion:
+            # Set flag to skip next autocomplete trigger
+            self.skip_next_autocomplete = True
+            
+            # Get cursor position
+            cursor_location = self.text_area.selection.end
+            cursor_row, cursor_col = cursor_location
+            
+            # Determine format type
+            format_type = "json" if self.syntax == "json" else "yaml"
+            
+            # Get current context to determine what to replace
+            partial_key, key_start_col = get_current_context(
+                self.text_area.text, cursor_row, cursor_col, format_type
+            )
+            
+            if partial_key is not None:
+                # Replace the partial key with the suggestion
+                lines = self.text_area.text.split('\n')
+                if cursor_row < len(lines):
+                    current_line = lines[cursor_row]
+                    
+                    # For JSON, we need to add the closing quote
+                    is_json = format_type == "json"
+                    
+                    if is_json:
+                        # Replace with suggestion and add closing quote
+                        new_line = (
+                            current_line[:key_start_col] + 
+                            suggestion + 
+                            '"' +  # Add closing quote for JSON
+                            current_line[cursor_col:]
+                        )
+                    else:
+                        # YAML - no quotes needed
+                        new_line = (
+                            current_line[:key_start_col] + 
+                            suggestion + 
+                            current_line[cursor_col:]
+                        )
+                    
+                    lines[cursor_row] = new_line
+                    
+                    # Update text
+                    self.text_area.text = '\n'.join(lines)
+                    
+                    # Move cursor to end of inserted suggestion (after closing quote for JSON)
+                    if is_json:
+                        new_col = key_start_col + len(suggestion) + 1  # +1 for closing quote
+                    else:
+                        new_col = key_start_col + len(suggestion)
+                    self.text_area.move_cursor((cursor_row, new_col))
+            
+            # Hide popup
+            self.autocomplete_popup.hide_popup()
+                        new_col = key_start_col + len(suggestion) + 1  # +1 for closing quote
+                    else:
+                        new_col = key_start_col + len(suggestion)
+                    self.text_area.move_cursor((cursor_row, new_col))
+            
+            # Hide popup
+            self.autocomplete_popup.hide_popup()
+
+    def on_key(self, event):
+        """
+        Handle key events for autocomplete navigation.
+        
+        When the autocomplete popup is visible, this method intercepts
+        arrow key and tab/escape presses to provide keyboard navigation
+        for the suggestion list.
+        """
+        # Check if autocomplete is visible
+        if self.autocomplete_popup.styles.display == "block":
+            if event.key == "up":
+                self.autocomplete_popup.navigate_up()
+                event.prevent_default()
+                event.stop()
+            elif event.key == "down":
+                self.autocomplete_popup.navigate_down()
+                event.prevent_default()
+                event.stop()
+            elif event.key == "tab":
+                # Accept the suggestion
+                self.action_accept_suggestion()
+                event.prevent_default()
+                event.stop()
+            elif event.key == "escape":
+                # Hide the popup
+                self.action_hide_autocomplete()
+                event.prevent_default()
+                event.stop()

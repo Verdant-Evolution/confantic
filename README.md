@@ -6,6 +6,13 @@ YAML and JSON configuration files are all over the place. For less polished work
 Expecting users to fill out text files to modify configuration is an extremely easy thing to develop, but has obvious UX limitations; the most notable of which is **user's often don't know which fields are expected and their constraints**.
 Confantic seeks to address this and take configuration files as UI a little more seriously.
 
+## Features
+
+- **Real-time Validation**: Validates your config against Pydantic models as you type
+- **Autocomplete**: IntelliSense-like autocompletion for field names
+- **JSON & YAML Support**: Works with both JSON and YAML config files
+- **Default Generation**: Automatically generates default values for new configs
+
 ## Installation
 
 `pip install confantic`
@@ -43,3 +50,29 @@ If the target file (`config.json` in this case) does not exist, it will populate
 If we change some of the fields to create an error, we see the error show up at the bottom:
 
 ![image](https://github.com/user-attachments/assets/3da4a8a2-0d72-481d-a001-6286ba43e474)
+
+## Autocomplete
+
+Confantic provides IntelliSense-like autocompletion to help you quickly fill in valid field names:
+
+### How It Works
+
+- **Automatic Suggestions**: Start typing a field name and matching suggestions appear automatically
+- **Keyboard Navigation**: Use ↑/↓ arrow keys to navigate through suggestions
+- **Quick Insert**: Press **Tab** to accept the highlighted suggestion
+- **Dismiss**: Press **ESC** to hide the autocomplete popup
+
+### Example
+
+When editing a JSON config:
+```json
+{
+  "h   <-- Type 'h' and suggestions like "hostname" appear
+```
+
+When editing a YAML config:
+```yaml
+h   <-- Type 'h' and suggestions appear
+```
+
+The autocomplete intelligently detects when you're typing a new key (not a value) and only suggests valid field names from your Pydantic model.
