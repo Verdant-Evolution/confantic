@@ -14,3 +14,6 @@ dependencies = [
 
 [project.scripts]
 confantic = "confantic.__main__:main"
+
+[tool.setuptools]
+packages = ["confantic"]

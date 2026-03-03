@@ -167,7 +167,7 @@ class Editor(App):
         self.document_version += 1
         
         # Schedule a delayed update
-        self.call_later(
+        self.set_timer(
             self._change_debounce_delay,
             self._send_lsp_change,
         )

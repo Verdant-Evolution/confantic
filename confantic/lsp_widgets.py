@@ -8,10 +8,8 @@ class DiagnosticsPopup(Static):
 
     DEFAULT_CSS = """
     DiagnosticsPopup {
-        position: absolute;
-        bottom: 2;
-        right: 2;
-        width: 60;
+        dock: bottom;
+        width: 100%;
         height: auto;
         max-height: 15;
         background: $panel;

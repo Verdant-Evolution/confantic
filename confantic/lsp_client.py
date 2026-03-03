@@ -60,16 +60,18 @@ class LSPClient:
         # Initialize the LSP connection
         self._initialize()
 
-    def _send_message(self, message: dict) -> int:
+    def _send_message(self, message: dict, is_notification: bool = False) -> int:
         """Send a JSON-RPC message to the server."""
         if not self.process or not self.process.stdin:
             raise RuntimeError("LSP server not started")
 
-        message_id = self.message_id
-        self.message_id += 1
-
-        if "id" not in message:
-            message["id"] = message_id
+        message_id = -1
+        
+        if not is_notification:
+            message_id = self.message_id
+            self.message_id += 1
+            if "id" not in message:
+                message["id"] = message_id
 
         content = json.dumps(message)
         content_bytes = content.encode("utf-8")
@@ -164,7 +166,14 @@ class LSPClient:
                     "textDocument": {
                         "completion": {"completionItem": {"snippetSupport": False}},
                         "publishDiagnostics": {},
-                    }
+                    },
+                    "workspace": {
+                        "configuration": True,
+                        "didChangeConfiguration": {"dynamicRegistration": True},
+                    },
+                },
+                "initializationOptions": {
+                    "provideFormatter": False,
                 },
             },
         }
@@ -172,10 +181,13 @@ class LSPClient:
         def on_init_response(response):
             # Send initialized notification
             self._send_message(
-                {"jsonrpc": "2.0", "method": "initialized", "params": {}}
+                {"jsonrpc": "2.0", "method": "initialized", "params": {}},
+                is_notification=True
             )
+            # Register the schema after initialization
+            self._register_schema()
 
-        msg_id = self._send_message(init_message)
+        msg_id = self._send_message(init_message, is_notification=False)
         with self._lock:
             self._response_handlers[msg_id] = on_init_response
 
@@ -194,13 +206,12 @@ class LSPClient:
             },
         }
         
-        # Register the schema
-        self._register_schema()
-        self._send_message(message)
+        self._send_message(message, is_notification=True)
 
     def _register_schema(self):
         """Register the JSON schema with the language server."""
         # Configure the schema association
+        # The fileMatch should match the URI pattern
         settings_message = {
             "jsonrpc": "2.0",
             "method": "workspace/didChangeConfiguration",
@@ -209,15 +220,16 @@ class LSPClient:
                     "json": {
                         "schemas": [
                             {
-                                "fileMatch": [self.file_uri],
+                                "fileMatch": ["*"],  # Match all files
                                 "schema": self.schema,
                             }
-                        ]
+                        ],
+                        "validate": {"enable": True},
                     }
                 }
             },
         }
-        self._send_message(settings_message)
+        self._send_message(settings_message, is_notification=True)
 
     def did_change(self, text: str, version: int = 1):
         """Notify the server that the document content changed."""
@@ -229,7 +241,7 @@ class LSPClient:
                 "contentChanges": [{"text": text}],
             },
         }
-        self._send_message(message)
+        self._send_message(message, is_notification=True)
 
     def completion(
         self, text: str, line: int, character: int, callback: Callable[[list], None]
@@ -254,7 +266,7 @@ class LSPClient:
                     items = result
             callback(items)
 
-        msg_id = self._send_message(message)
+        msg_id = self._send_message(message, is_notification=False)
         with self._lock:
             self._response_handlers[msg_id] = on_completion_response
 
@@ -269,9 +281,9 @@ class LSPClient:
         if self.process:
             try:
                 # Send shutdown request
-                self._send_message({"jsonrpc": "2.0", "method": "shutdown"})
+                self._send_message({"jsonrpc": "2.0", "method": "shutdown"}, is_notification=False)
                 # Send exit notification
-                self._send_message({"jsonrpc": "2.0", "method": "exit"})
+                self._send_message({"jsonrpc": "2.0", "method": "exit"}, is_notification=True)
             except Exception:
                 pass
 
