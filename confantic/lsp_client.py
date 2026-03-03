@@ -46,9 +46,7 @@ class LSPClient:
             )
 
         if not server_path.exists():
-            raise RuntimeError(
-                f"vscode-json-languageserver not found. Please install it with: npm install"
-            )
+            raise RuntimeError("vscode-json-languageserver not found.")
 
         # Start the LSP server
         self.process = subprocess.Popen(
