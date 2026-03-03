@@ -1,5 +1,5 @@
 """UI widgets for LSP feedback."""
-from textual.containers import Container
+
 from textual.widgets import Static
 
 
@@ -30,7 +30,7 @@ class DiagnosticsPopup(Static):
     def update_diagnostics(self, diagnostics: list[dict]):
         """Update the displayed diagnostics."""
         self.diagnostics = diagnostics
-        
+
         if not diagnostics:
             self.remove_class("visible")
             self.update("")
@@ -44,13 +44,13 @@ class DiagnosticsPopup(Static):
                 severity, "UNKNOWN"
             )
             message = diag.get("message", "")
-            
+
             # Get range information
             range_info = diag.get("range", {})
             start = range_info.get("start", {})
             line = start.get("line", 0) + 1  # Convert to 1-indexed
             char = start.get("character", 0)
-            
+
             lines.append(f"[{severity_str}] Line {line}:{char}")
             lines.append(f"  {message}")
 
@@ -87,7 +87,8 @@ class CompletionPopup(Static):
     def update_completions(self, completions: list[dict]):
         """Update the displayed completions."""
         self.completions = completions
-        
+        max_completions = 8
+
         if not completions:
             self.remove_class("visible")
             self.update("")
@@ -95,7 +96,7 @@ class CompletionPopup(Static):
 
         # Format completions for display
         lines = ["Suggestions:"]
-        for item in completions[:8]:  # Show max 8 completions
+        for item in completions[:max_completions]:  # Show max 8 completions
             label = item.get("label", "")
             detail = item.get("detail", "")
             if detail:
@@ -103,8 +104,8 @@ class CompletionPopup(Static):
             else:
                 lines.append(f"  • {label}")
 
-        if len(completions) > 8:
-            lines.append(f"  ... and {len(completions) - 8} more")
+        if len(completions) > max_completions:
+            lines.append(f"  ... and {len(completions) - max_completions} more")
 
         self.update("\n".join(lines))
         self.add_class("visible")

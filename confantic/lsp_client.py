@@ -1,10 +1,11 @@
 """LSP Client for communicating with vscode-json-languageserver."""
+
 import json
+import os
 import subprocess
 import threading
 from pathlib import Path
 from typing import Any, Callable, Optional
-import os
 
 
 class LSPClient:
@@ -13,7 +14,7 @@ class LSPClient:
     def __init__(self, schema: dict[str, Any], file_uri: str):
         """
         Initialize LSP client.
-        
+
         Args:
             schema: JSON schema for validation
             file_uri: URI of the file being edited (e.g., file:///path/to/file.json)
@@ -34,11 +35,16 @@ class LSPClient:
         # Find the language server executable
         node_modules_path = Path(__file__).parent.parent / "node_modules"
         server_path = node_modules_path / ".bin" / "vscode-json-languageserver"
-        
+
         if not server_path.exists():
             # Try alternative path
-            server_path = node_modules_path / "vscode-json-languageserver" / "bin" / "vscode-json-languageserver"
-        
+            server_path = (
+                node_modules_path
+                / "vscode-json-languageserver"
+                / "bin"
+                / "vscode-json-languageserver"
+            )
+
         if not server_path.exists():
             raise RuntimeError(
                 f"vscode-json-languageserver not found. Please install it with: npm install"
@@ -66,7 +72,7 @@ class LSPClient:
             raise RuntimeError("LSP server not started")
 
         message_id = -1
-        
+
         if not is_notification:
             message_id = self.message_id
             self.message_id += 1
@@ -115,9 +121,7 @@ class LSPClient:
 
                     # Read the content
                     while len(buffer) < content_length:
-                        chunk = self.process.stdout.read(
-                            content_length - len(buffer)
-                        )
+                        chunk = self.process.stdout.read(content_length - len(buffer))
                         if not chunk:
                             break
                         buffer += chunk
@@ -182,7 +186,7 @@ class LSPClient:
             # Send initialized notification
             self._send_message(
                 {"jsonrpc": "2.0", "method": "initialized", "params": {}},
-                is_notification=True
+                is_notification=True,
             )
             # Register the schema after initialization
             self._register_schema()
@@ -205,7 +209,7 @@ class LSPClient:
                 }
             },
         }
-        
+
         self._send_message(message, is_notification=True)
 
     def _register_schema(self):
@@ -258,6 +262,7 @@ class LSPClient:
 
         def on_completion_response(response):
             result = response.get("result")
+            print(result)
             items = []
             if result:
                 if isinstance(result, dict):
@@ -281,9 +286,13 @@ class LSPClient:
         if self.process:
             try:
                 # Send shutdown request
-                self._send_message({"jsonrpc": "2.0", "method": "shutdown"}, is_notification=False)
+                self._send_message(
+                    {"jsonrpc": "2.0", "method": "shutdown"}, is_notification=False
+                )
                 # Send exit notification
-                self._send_message({"jsonrpc": "2.0", "method": "exit"}, is_notification=True)
+                self._send_message(
+                    {"jsonrpc": "2.0", "method": "exit"}, is_notification=True
+                )
             except Exception:
                 pass
 

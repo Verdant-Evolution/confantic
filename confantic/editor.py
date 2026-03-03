@@ -1,7 +1,7 @@
 import json
 import time
 from pathlib import Path
-from typing import Literal, Sequence, Union, Optional
+from typing import Literal, Optional, Sequence, Union
 
 import yaml
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -10,10 +10,10 @@ from textual.containers import Vertical
 from textual.widgets import Footer, Header, Static, TextArea
 
 from .lib import Parser, get_model_default, render_type_name
-from .validate import validate
 from .lsp_client import LSPClient
-from .lsp_widgets import DiagnosticsPopup, CompletionPopup
+from .lsp_widgets import CompletionPopup, DiagnosticsPopup
 from .schema_converter import pydantic_to_json_schema
+from .validate import validate
 
 ParseFormat = Literal["json", "yaml"]
 
@@ -42,7 +42,7 @@ class Editor(App):
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+v", "validate", "Validate"),
         ("f5", "validate", "Validate"),
-        ("ctrl+space", "show_completions", "Completions"),
+        ("ctrl+@", "show_completions", "Completions"),
     ]
 
     def __init__(
@@ -55,7 +55,7 @@ class Editor(App):
     ):
         super().__init__(**kwargs)
         self.model = model
-        self.file_path = Path(file_path)
+        self.file_path = Path(file_path).absolute()
         self.force_clean = force_clean
 
         parser = PARSERS.get(force_format or self.file_path.suffix.lstrip("."), None)
@@ -71,7 +71,7 @@ class Editor(App):
 
         self.validation_panel = ValidationErrorPanel()
         self.text_area = TextArea(language=self.syntax)
-        
+
         # LSP support
         self.lsp_client: Optional[LSPClient] = None
         self.diagnostics_popup = DiagnosticsPopup()
@@ -112,7 +112,7 @@ class Editor(App):
 
         self.text_area.text = initial_content
         self.action_validate()
-        
+
         # Initialize LSP for JSON files
         if self.syntax == "json":
             self._init_lsp()
@@ -122,21 +122,21 @@ class Editor(App):
         try:
             # Convert Pydantic model to JSON schema
             schema = pydantic_to_json_schema(self.model)
-            
+
             # Create file URI
             file_uri = self.file_path.as_uri()
-            
+
             # Start LSP client
             self.lsp_client = LSPClient(schema, file_uri)
             self.lsp_client.start()
-            
+
             # Open the document
             self.lsp_client.did_open(self.text_area.text)
             self.lsp_enabled = True
-            
+
             # Set up periodic diagnostics update
             self.set_interval(0.5, self._update_lsp_diagnostics)
-            
+
         except Exception as e:
             self.notify(
                 f"LSP initialization failed: {e}",
@@ -148,7 +148,7 @@ class Editor(App):
         """Update diagnostics from LSP."""
         if not self.lsp_enabled or not self.lsp_client:
             return
-            
+
         try:
             diagnostics = self.lsp_client.get_diagnostics()
             self.diagnostics_popup.update_diagnostics(diagnostics)
@@ -160,11 +160,11 @@ class Editor(App):
         """Handle text area changes."""
         if not self.lsp_enabled or not self.lsp_client:
             return
-        
+
         # Debounce: only send changes after a delay
         self._last_change_time = time.time()
         self.document_version += 1
-        
+
         # Schedule a delayed update
         self.set_timer(
             self._change_debounce_delay,
@@ -175,17 +175,14 @@ class Editor(App):
         """Send document changes to LSP after debounce delay."""
         if not self.lsp_enabled or not self.lsp_client:
             return
-            
+
         # Check if enough time has passed since last change
         time_since_change = time.time() - self._last_change_time
         if time_since_change < self._change_debounce_delay:
             return
-        
+
         try:
-            self.lsp_client.did_change(
-                self.text_area.text,
-                self.document_version
-            )
+            self.lsp_client.did_change(self.text_area.text, self.document_version)
         except Exception:
             # Silently ignore errors
             pass
@@ -233,26 +230,22 @@ class Editor(App):
         """Show LSP completions at the current cursor position."""
         if not self.lsp_enabled or not self.lsp_client:
             return
-        
-        # Get cursor position
-        cursor = self.text_area.cursor_location
-        line, character = cursor
-        
+
+        line, character = self.text_area.cursor_location
+
         def on_completions(items):
             self.completion_popup.update_completions(items)
-            if items:
-                # Auto-hide after a few seconds
-                self.set_timer(5.0, self.completion_popup.hide)
-        
+            self.set_timer(2.0, self.completion_popup.hide)
+
         try:
             self.lsp_client.completion(
                 self.text_area.text,
                 line,
                 character,
-                on_completions
+                lambda items: self.call_from_thread(on_completions, items),
             )
         except Exception:
-            # Silently ignore errors
+            self.notify("Failed to fetch completions", severity="error", timeout=2)
             pass
 
     def on_unmount(self):
