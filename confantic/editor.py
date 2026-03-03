@@ -8,7 +8,6 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Footer, Header, Static, TextArea
-from textual.reactive import reactive
 
 from .lib import Parser, get_model_default, render_type_name
 from .validate import validate

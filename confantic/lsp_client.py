@@ -81,7 +81,7 @@ class LSPClient:
             self.process.stdin.write(header.encode("utf-8"))
             self.process.stdin.write(content_bytes)
             self.process.stdin.flush()
-        except Exception as e:
+        except Exception:
             # Silently ignore write errors to avoid crashing
             pass
 

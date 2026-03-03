@@ -103,7 +103,3 @@ def test_lsp_client_diagnostics():
         client.stop()
         time.sleep(0.5)
 
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
-
